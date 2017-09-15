@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"encoding/xml"
+	"reflect"
 )
 
 var logFile *os.File
@@ -62,9 +63,18 @@ func compareBasicInfo(beforePmb PMBasic, afterPmb PMBasic) {
 	compareField("Product.Description", beforePmb.Product.Description, afterPmb.Product.Description, true, devType, "", "", "")
 }
 
-func compareElementNumber(element string, before []interface{}, after []interface{})  {
-	lenBefore := len(before)
-	lenAfter := len(after)
+func compareElementNumber(element string, before interface{}, after interface{})  {
+	bt := reflect.TypeOf(before)
+	at := reflect.TypeOf(after)
+
+	if bt.Kind() != reflect.Slice {
+		panic("before argument is not slice")
+	}
+	if at.Kind() != reflect.Slice {
+		panic("after argument is not slice")
+	}
+	lenBefore := reflect.ValueOf(before).Len()
+	lenAfter := reflect.ValueOf(after).Len()
 	if lenBefore != lenAfter {
 		fmt.Println("Number of", element, "is not equal, before:", lenBefore, ", after:", lenAfter)
 		write(fmt.Sprint("Number of", element, "is not equal, before:", lenBefore, ", after:", lenAfter))
@@ -77,8 +87,60 @@ func compareElementNumber(element string, before []interface{}, after []interfac
 	}
 }
 
+func compareElements(before interface{}, after interface{}, fieldName string) {
+	bt := reflect.TypeOf(before)
+	at := reflect.TypeOf(after)
+
+	if bt.Kind() != reflect.Slice {
+		panic("before argument is not slice")
+	}
+	if at.Kind() != reflect.Slice {
+		panic("after argument is not slice")
+	}
+
+
+	bv := reflect.ValueOf(before)
+	av := reflect.ValueOf(after)
+
+	for i := 0; i < bv.Len(); i++ {
+		be := bv.Index(i)
+		bTypeName := be.Type().Name()
+		bFieldValue := be.FieldByName(fieldName).String()
+
+		isFound := false
+
+		for j := 0; j < av.Len(); j++ {
+			ae := av.Index(j)
+			aFieldValue := ae.FieldByName(fieldName).String()
+
+			if bFieldValue == aFieldValue {
+				isFound = true
+				compareElement(be, ae)
+				break
+			}
+		}
+		if !isFound {
+			fmt.Println(bTypeName, "[", bFieldValue, "] is not found in exported PMB")
+			write(fmt.Sprint(bTypeName, "[", bFieldValue, "] is not found in exported PMB"))
+			deviation := Deviation {
+				Level: "error",
+				Type: "Missing PMClassInfo",
+				PmClass: bFieldValue,
+				Message: fmt.Sprint(fmt.Sprint(bTypeName, "[", bFieldValue, "] is not found in exported PMB")),
+			}
+			deviations = append(deviations, deviation)
+		}
+	}
+}
+
+func compareElement(before interface{}, after interface{}) {
+
+}
+
 func comparePMClasses(beforePmb PMBasic, afterPmb PMBasic)  {
 	compareElementNumber("PMClassInfo", beforePmb.PMClasses.PMClassInfo, afterPmb.PMClasses.PMClassInfo)
+
+	compareElements(beforePmb.PMClasses.PMClassInfo, afterPmb.PMClasses.PMClassInfo, "Name")
 
 	for _, beforeClass := range beforePmb.PMClasses.PMClassInfo {
 		isFound := false

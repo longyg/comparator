@@ -2,7 +2,7 @@ package main
 
 import (
 	"flag"
-	"GoTest/pm/util"
+	"comparator/pm/util"
 )
 
 func main()  {

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"GoTest/amanual"
+	"comparator/amanual"
 )
 
 func main()  {
