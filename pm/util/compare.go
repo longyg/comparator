@@ -46,24 +46,81 @@ func compare(beforePmb PMBasic, afterPmb PMBasic) {
 	compareAdminOfMeasurements(beforePmb.AdminOfMeasurements, afterPmb.AdminOfMeasurements)
 }
 
-func compareBasicInfo(beforePmb PMBasic, afterPmb PMBasic) {
-	fmt.Println("==================== Compare PMB basic information =======================")
-	write(fmt.Sprint("==================== Compare PMB basic information ======================="))
-	devType := "PMB Basic Info Deviation"
-	compareField("xmlns:ns2", beforePmb.Xmlns2, afterPmb.Xmlns2, true, devType, "", "", "")
-	compareField("xmlns:ns3", beforePmb.Xmlns3, afterPmb.Xmlns3, true, devType, "", "", "")
-	compareField("xmlns:xsi", beforePmb.XmlnsXSI, afterPmb.XmlnsXSI, true, devType, "", "", "")
-	compareField("schemaVersion", beforePmb.SchemaVersion, afterPmb.SchemaVersion, true, devType, "", "", "")
-	compareField("interfaceVersion", beforePmb.InterfaceVersion, afterPmb.InterfaceVersion, true, devType, "", "", "")
-	compareField("schemaLocation", beforePmb.SchemaLocation, afterPmb.SchemaLocation, true, devType, "", "", "")
-	compareField("Adaptation.href", beforePmb.Adaptation.Href, afterPmb.Adaptation.Href, true, devType, "", "", "")
-	compareField("Product.typeName", beforePmb.Product.TypeName, afterPmb.Product.TypeName, true, devType, "", "", "")
-	compareField("Product.vendor", beforePmb.Product.Vendor, afterPmb.Product.Vendor, true, devType, "", "", "")
-	compareField("Product.release", beforePmb.Product.Release, afterPmb.Product.Release, true, devType, "", "", "")
-	compareField("Product.Description", beforePmb.Product.Description, afterPmb.Product.Description, true, devType, "", "", "")
+type Context struct {
+	PMClass string
+	MeasurementType string
+	Counter string
+	Dimension string
 }
 
-func compareElementNumber(element string, before interface{}, after interface{})  {
+func compareBasicInfo(beforePmb PMBasic, afterPmb PMBasic) {
+	pmBasicFields := []interface{}{
+		FieldDef{"Xmlns3", "", "xmlns:ns3", false},
+		FieldDef{"XmlnsXSI", "", "xmlns:xsi", false},
+		FieldDef{"SchemaVersion", "", "schemaVersion", false},
+		FieldDef{"InterfaceVersion", "", "interfaceVersion", false},
+		FieldDef{"SchemaLocation", "", "schemaLocation", false},
+	}
+	compareFields(beforePmb, afterPmb, pmBasicFields)
+
+	adaptationFields := []interface{}{
+		FieldDef{"Href", "", "href", false},
+	}
+	compareFields(beforePmb.Adaptation, afterPmb.Adaptation, adaptationFields)
+
+	productFields := []interface{}{
+		FieldDef{"TypeName", "", "typeName", false},
+		FieldDef{"Vendor", "", "vendor", false},
+		FieldDef{"Release", "", "release", false},
+		FieldDef{"Description", "", "Description", false},
+	}
+	compareFields(beforePmb.Product, afterPmb.Product, productFields)
+}
+
+func compareFields(before interface{}, after interface{}, fields interface{}) {
+	bv := reflect.ValueOf(before)
+	elementType := getElementTypeName(bv)
+
+	av := reflect.ValueOf(after)
+	category := fmt.Sprint(elementType, " Deviation")
+
+	ft := reflect.TypeOf(fields)
+	if ft.Kind() != reflect.Slice {
+		panic("'fields' argument is not slice")
+	}
+
+	fv := reflect.ValueOf(fields)
+	for i :=0; i < fv.Len(); i++ {
+		fve := fv.Index(i)
+		fvet := fve.Elem().Type().Name()
+		if fvet == "FieldDef" {
+			fieldName := getFieldStringValue(fve.Elem(), "FieldName")
+			defaultValue := getFieldStringValue(fve.Elem(), "DefaultValue")
+			xmlFieldName := getFieldStringValue(fve.Elem(), "XmlFieldName")
+			handleEmpty := getFieldBoolValue(fve.Elem(), "HandleEmpty")
+
+			bFieldValue := getFieldStringValue(bv, fieldName)
+			aFieldValue := getFieldStringValue(av, fieldName)
+
+			if handleEmpty {
+				if bFieldValue == "" && defaultValue != "" {
+					bFieldValue = defaultValue
+				}
+				if aFieldValue == "" && defaultValue != "" {
+					aFieldValue = defaultValue
+				}
+			}
+
+			fieldInfo := fmt.Sprint(elementType, " [", xmlFieldName, "]")
+			compareField(fieldInfo, bFieldValue, aFieldValue, true, category, Context{})
+		} else {
+			fmt.Println("Error: Invalid field", fve)
+			panic("Invalid field")
+		}
+	}
+}
+
+func compareNumber(element string, before interface{}, after interface{}, context Context)  {
 	bt := reflect.TypeOf(before)
 	at := reflect.TypeOf(after)
 
@@ -76,18 +133,34 @@ func compareElementNumber(element string, before interface{}, after interface{})
 	lenBefore := reflect.ValueOf(before).Len()
 	lenAfter := reflect.ValueOf(after).Len()
 	if lenBefore != lenAfter {
-		fmt.Println("Number of", element, "is not equal, before:", lenBefore, ", after:", lenAfter)
-		write(fmt.Sprint("Number of", element, "is not equal, before:", lenBefore, ", after:", lenAfter))
-		deviation := Deviation {
-			Level: "error",
-			Type: fmt.Sprint(element, "Number Deviation"),
-			Message: fmt.Sprint("Number of", element, "is not equal, before:", lenBefore, ", after:", lenAfter),
-		}
-		deviations = append(deviations, deviation)
+		message := fmt.Sprint("Number of ", element, " is not equal, before: {", lenBefore, "}, after: {", lenAfter, "}")
+		category := fmt.Sprint(element, " Number Deviation")
+		logDeviation(category, message, context)
 	}
 }
 
-func compareElements(before interface{}, after interface{}, fieldName string) {
+func raiseDeviation(category string, message string, context Context) {
+	deviation := Deviation {
+		Level: "error",
+		DeviationCategory: category,
+		Message: fmt.Sprint(message),
+	}
+	if context.PMClass != "" {
+		deviation.PmClass = &context.PMClass
+	}
+	if context.MeasurementType != "" {
+		deviation.MeasurementType = &context.MeasurementType
+	}
+	if context.Counter != "" {
+		deviation.Counter = &context.Counter
+	}
+	if context.Dimension != "" {
+		deviation.Dimension = &context.Dimension
+	}
+	deviations = append(deviations, deviation)
+}
+
+func compareElements(before interface{}, after interface{}, keyFieldName string, fields interface{}, context Context) {
 	bt := reflect.TypeOf(before)
 	at := reflect.TypeOf(after)
 
@@ -98,283 +171,304 @@ func compareElements(before interface{}, after interface{}, fieldName string) {
 		panic("after argument is not slice")
 	}
 
-
 	bv := reflect.ValueOf(before)
 	av := reflect.ValueOf(after)
 
+	compareBeforeWithAfter(bv, av, keyFieldName, fields, context)
+	compareAfterWithBefore(av, bv, keyFieldName, context)
+}
+
+func compareBeforeWithAfter(bv reflect.Value, av reflect.Value, keyFieldName string, fields interface{}, context Context) {
 	for i := 0; i < bv.Len(); i++ {
 		be := bv.Index(i)
 		bTypeName := be.Type().Name()
-		bFieldValue := be.FieldByName(fieldName).String()
+		bFieldValue := getFieldValue(be, keyFieldName)
 
 		isFound := false
 
 		for j := 0; j < av.Len(); j++ {
 			ae := av.Index(j)
-			aFieldValue := ae.FieldByName(fieldName).String()
+			aFieldValue := getFieldValue(ae, keyFieldName)
 
 			if bFieldValue == aFieldValue {
 				isFound = true
-				compareElement(be, ae)
+				ctx := setContext(context, bTypeName, bFieldValue)
+				compareElementFields(be, ae, keyFieldName, fields, ctx)
 				break
 			}
 		}
 		if !isFound {
-			fmt.Println(bTypeName, "[", bFieldValue, "] is not found in exported PMB")
-			write(fmt.Sprint(bTypeName, "[", bFieldValue, "] is not found in exported PMB"))
-			deviation := Deviation {
-				Level: "error",
-				Type: "Missing PMClassInfo",
-				PmClass: bFieldValue,
-				Message: fmt.Sprint(fmt.Sprint(bTypeName, "[", bFieldValue, "] is not found in exported PMB")),
-			}
-			deviations = append(deviations, deviation)
+			message := fmt.Sprint(fmt.Sprint(bTypeName, " [", bFieldValue, "] is missing in exported PMB"))
+			category := fmt.Sprint("Missing ", bTypeName)
+			logDeviation(category, message, context)
 		}
 	}
 }
 
-func compareElement(before interface{}, after interface{}) {
+func setContext(context Context, typeName string, fieldValue string) Context {
+	if typeName == "PMClassInfo" {
+		context.PMClass = fieldValue
+	}
+	if typeName == "Measurement" {
+		context.MeasurementType = fieldValue
+	}
+	if typeName == "MeasuredTarget" {
+		context.Dimension = fieldValue
+	}
+	if typeName == "MeasuredIndicator" {
+		context.Counter = fieldValue
+	}
+	return context
+}
 
+func compareAfterWithBefore(av reflect.Value, bv reflect.Value, keyFieldName string, context Context) {
+	for i := 0; i < av.Len(); i++ {
+		ae := av.Index(i)
+		aTypeName := ae.Type().Name()
+		aFieldValue := getFieldValue(ae, keyFieldName)
+
+		isFound := false
+
+		for j := 0; j < bv.Len(); j++ {
+			be := bv.Index(j)
+			bFieldValue := getFieldValue(be, keyFieldName)
+
+			if aFieldValue == bFieldValue {
+				isFound = true
+				break
+			}
+		}
+		if !isFound {
+			message := fmt.Sprint(fmt.Sprint(aTypeName, " [", aFieldValue, "] is adding in exported PMB"))
+			category := fmt.Sprint("Adding ", aTypeName)
+			logDeviation(category, message, context)
+		}
+	}
+}
+
+func getFieldValue(v reflect.Value, fieldName string) string {
+	fieldValue := ""
+	if v.Kind() == reflect.String {
+		fieldValue = v.String()
+	} else {
+		fieldValue = v.FieldByName(fieldName).String()
+	}
+	return fieldValue
+}
+
+type FieldDef struct {
+	FieldName string
+	DefaultValue string
+	XmlFieldName string
+	HandleEmpty bool
+}
+
+func getFieldStringValue(v reflect.Value, fieldName string) string {
+	return v.FieldByName(fieldName).String()
+}
+
+func getFieldBoolValue(v reflect.Value, fieldName string) bool {
+	return v.FieldByName(fieldName).Bool()
+}
+
+func getElementTypeName(v reflect.Value) string {
+	return v.Type().Name()
+}
+
+func compareElementFields(bv reflect.Value, av reflect.Value, keyFieldName string, fields interface{}, context Context) {
+	if bv.Type().Name() == "string" {
+		return
+	}
+	elementType := getElementTypeName(bv)
+	bIdentiferFieldValue := getFieldStringValue(bv, keyFieldName)
+
+	ft := reflect.TypeOf(fields)
+	if ft.Kind() != reflect.Slice {
+		panic("'fields' argument is not slice")
+	}
+	fv := reflect.ValueOf(fields)
+	for i :=0; i < fv.Len(); i++ {
+		fve := fv.Index(i)
+		fvet := fve.Elem().Type().Name()
+		if fvet == "FieldDef" {
+			fieldName := getFieldStringValue(fve.Elem(), "FieldName")
+			defaultValue := getFieldStringValue(fve.Elem(), "DefaultValue")
+			xmlFieldName := getFieldStringValue(fve.Elem(), "XmlFieldName")
+			handleEmpty := getFieldBoolValue(fve.Elem(), "HandleEmpty")
+
+			bFieldValue := getFieldStringValue(bv, fieldName)
+			aFieldValue := getFieldStringValue(av, fieldName)
+
+			if handleEmpty {
+				if "" == bFieldValue {
+					if "" == defaultValue {
+						bFieldValue = bIdentiferFieldValue
+					} else {
+						bFieldValue = defaultValue
+					}
+				}
+				if "" == aFieldValue {
+					if "" == defaultValue {
+						aFieldValue = getFieldStringValue(av, keyFieldName)
+					} else {
+						aFieldValue = defaultValue
+					}
+				}
+			}
+
+			compareFieldValue(elementType, bIdentiferFieldValue, bFieldValue, aFieldValue, xmlFieldName, context)
+		} else {
+			fmt.Println("Error: Invalid field", fve)
+			panic("Invalid field")
+		}
+	}
+}
+
+func compareFieldValue(elementType string, identifer string, bFieldValue string, aFieldValue string, xmlFieldName string, context Context) {
+	fieldInfo := fmt.Sprint(elementType, " [", identifer, "] ", xmlFieldName)
+	category := fmt.Sprint(elementType, " Deviation")
+	if elementType == "MeasuredIndicator" {
+		category = "Counter Deviation"
+	}
+	compareField(fieldInfo, bFieldValue, aFieldValue, true, category, context)
 }
 
 func comparePMClasses(beforePmb PMBasic, afterPmb PMBasic)  {
-	compareElementNumber("PMClassInfo", beforePmb.PMClasses.PMClassInfo, afterPmb.PMClasses.PMClassInfo)
+	ctx := Context{}
+	compareNumber("PMClassInfo", beforePmb.PMClasses.PMClassInfo, afterPmb.PMClasses.PMClassInfo, ctx)
 
-	compareElements(beforePmb.PMClasses.PMClassInfo, afterPmb.PMClasses.PMClassInfo, "Name")
-
-	for _, beforeClass := range beforePmb.PMClasses.PMClassInfo {
-		isFound := false
-		for _, afterClass := range afterPmb.PMClasses.PMClassInfo {
-			if beforeClass.Name == afterClass.Name {
-				isFound = true
-				comparePMClassInfo(beforeClass, afterClass)
-				break
-			}
-		}
-		if !isFound {
-			fmt.Println("PM class:", beforeClass.Name, "is not found in exported PMB")
-			write(fmt.Sprint("PM class:", beforeClass.Name, "is not found in exported PMB"))
-			deviation := Deviation {
-				Level: "error",
-				Type: "Missing PMClassInfo",
-				PmClass: beforeClass.Name,
-				Message: fmt.Sprint(fmt.Sprint("PM class:", beforeClass.Name, "is not found in exported PMB")),
-			}
-			deviations = append(deviations, deviation)
-		}
+	fields := []interface{} {
+		FieldDef{"NameInOMeS", "", "nameInOMeS", true},
+		FieldDef{"Intransient", "", "intransient", false},
+		FieldDef{"Presentation", "", "presentation", true},
+		FieldDef{"Description", "", "Description", false},
 	}
-
-	for _, afterClass := range afterPmb.PMClasses.PMClassInfo {
-		isFound := false
-		for _, beforeClass := range beforePmb.PMClasses.PMClassInfo {
-			if afterClass.Name == beforeClass.Name {
-				isFound = true
-				break
-			}
-		}
-		if !isFound {
-			fmt.Println("PM class:", afterClass.Name, "is added wrongly in exported PMB")
-			write(fmt.Sprint("PM class:", afterClass.Name, "is added wrongly in exported PMB"))
-			deviation := Deviation {
-				Level: "error",
-				Type: "Adding PMClassInfo",
-				PmClass: afterClass.Name,
-				Message: fmt.Sprint(fmt.Sprint("PM class:", afterClass.Name, "is added wrongly in exported PMB")),
-			}
-			deviations = append(deviations, deviation)
-		}
-	}
-}
-
-func comparePMClassInfo(beforeClass PMClassInfo, afterClass PMClassInfo) {
-	fmt.Println("==================== Compare PMClassInfo:", beforeClass.Name, "=======================")
-	write(fmt.Sprint("==================== Compare PMClassInfo:", beforeClass.Name, "======================="))
-	devType := "PMClassInfo Deviation"
-	compareField("PMClassInfo [" + beforeClass.Name + "] nameInOmes", beforeClass.NameInOMeS, afterClass.NameInOMeS, true, devType, beforeClass.Name, "", "")
-	compareField("[" + beforeClass.Name + "] intransient", beforeClass.Intransient, afterClass.Intransient, true, devType, beforeClass.Name, "", "")
-	compareField("[" + beforeClass.Name + "] presentation", beforeClass.Presentation, afterClass.Presentation, true, devType, beforeClass.Name, "", "")
-	compareField("[" + beforeClass.Name + "] Description", beforeClass.Description, afterClass.Description, true, devType, beforeClass.Name, "", "")
+	compareElements(beforePmb.PMClasses.PMClassInfo, afterPmb.PMClasses.PMClassInfo, "Name", fields, ctx)
 }
 
 func compareAdminOfMeasurements(before *AdminOfMeasurements, after *AdminOfMeasurements)  {
-	fmt.Println("==================== Compare AdminOfMeasurements =======================")
-	write(fmt.Sprint("==================== Compare AdminOfMeasurements ======================="))
+	category := "AoM Config Deviation"
+	context := Context{}
 	if nil != before && nil != after {
-		compareSupportedMeasurementIntervals(before.SupportedMeasurementIntervals, after.SupportedMeasurementIntervals, Measurement{})
+		compareSupportedMeasurementIntervals(before.SupportedMeasurementIntervals, after.SupportedMeasurementIntervals, Context{})
 	} else if nil != before && nil == after {
-		fmt.Println("AdminOfMeasurements is not exported")
-		write(fmt.Sprint("AdminOfMeasurements is not exported"))
+		message := fmt.Sprint("AdminOfMeasurements is missing in exported PMB")
+		logDeviation(category, message, context)
 	} else if nil == before && nil != after {
-		fmt.Println("AdminOfMeasurements is added in exported PMB")
-		write(fmt.Sprint("AdminOfMeasurements is added in exported PMB"))
-	} else {
-		fmt.Println("AdminOfMeasurements is not defined either before NIDD and after NIDD")
-		write(fmt.Sprint("AdminOfMeasurements is not defined either before NIDD and after NIDD"))
+		message := fmt.Sprint("AdminOfMeasurements is adding in exported PMB")
+		logDeviation(category, message, context)
 	}
 }
 
 func compareMeasurements(beforePmb PMBasic, afterPmb PMBasic) {
-	lenBefore := len(beforePmb.Measurement)
-	lenAfter := len(afterPmb.Measurement)
-	if lenBefore != lenAfter {
-		fmt.Println("Number of Measurement is not equal, before:", lenBefore, ", after:", lenAfter)
-		write(fmt.Sprint("Number of Measurement is not equal, before:", lenBefore, ", after:", lenAfter))
-	} else {
-		for _, before := range beforePmb.Measurement {
-			isFound := false
-			for _, after := range afterPmb.Measurement {
-				if before.MeasurementType == after.MeasurementType {
-					isFound = true
-					compareMeasurement(before, after)
-					break
-				}
-			}
-			if !isFound {
-				fmt.Println("PM class:", before.MeasurementType, "is not found in exported PMB")
-				write(fmt.Sprint("PM class:", before.MeasurementType, "is not found in exported PMB"))
-			}
-		}
+	ctx := Context{}
+	compareNumber("Measurement", beforePmb.Measurement, afterPmb.Measurement, ctx)
 
-		for _, after := range afterPmb.Measurement {
-			isFound := false
-			for _, before := range beforePmb.Measurement {
-				if after.MeasurementType == before.MeasurementType {
-					isFound = true
-					break
+	measurementFields := []interface{} {
+		FieldDef{"MeasurementTypeInOMeS", "", "measurementTypeInOMeS", true},
+		FieldDef{"Presentation", "", "presentation", true},
+		FieldDef{"DefaultInterval", "", "defaultInterval", true},
+		FieldDef{"NetworkElementMeasurementId", "", "networkElementMeasurementId", true},
+		FieldDef{"OmesFileGroupName", "", "omesFileGroupName", true},
+		FieldDef{"ResultsPerInterval", "", "resultsPerInterval", true},
+		FieldDef{"AomSupported", "true", "aomSupported", true},
+		FieldDef{"Description", "", "Description", true},
+	}
+	compareElements(beforePmb.Measurement, afterPmb.Measurement, "MeasurementType", measurementFields, ctx);
+
+	compareMeasurementChildElements(beforePmb, afterPmb)
+}
+
+func compareMeasurementChildElements(beforePmb PMBasic, afterPmb PMBasic) {
+	for _, beforeMeas := range beforePmb.Measurement {
+		for _, afterMeas := range afterPmb.Measurement {
+			if beforeMeas.MeasurementType == afterMeas.MeasurementType {
+
+				measCtx := Context {"", beforeMeas.MeasurementType, "", ""}
+				compareNumber("MeasuredTarget", beforeMeas.MeasuredTarget, afterMeas.MeasuredTarget, measCtx)
+				compareElements(beforeMeas.MeasuredTarget, afterMeas.MeasuredTarget, "Dimension", []interface{}{}, measCtx)
+
+				for _, bMt := range beforeMeas.MeasuredTarget {
+					for _, aMt := range afterMeas.MeasuredTarget {
+						if bMt.Dimension == aMt.Dimension {
+							mTCtx := Context{"", beforeMeas.MeasurementType, "", bMt.Dimension}
+							compareNumber("Hierarchy", bMt.Hierarchy, aMt.Hierarchy, mTCtx)
+							compareElements(bMt.Hierarchy, aMt.Hierarchy, "Classes", []interface{}{}, mTCtx)
+						}
+					}
 				}
-			}
-			if !isFound {
-				fmt.Println("PM class:", after.MeasurementType, "is added wrongly in exported PMB")
-				write(fmt.Sprint("PM class:", after.MeasurementType, "is added wrongly in exported PMB"))
+
+				compareNumber("Counter", beforeMeas.MeasuredIndicator, afterMeas.MeasuredIndicator, measCtx)
+				counterFields := []interface{} {
+					FieldDef{"NameInOMeS", "", "nameInOMeS", true},
+					FieldDef{"Description", "", "Description", false},
+					FieldDef{"DataCollectionMethod", "", "dataCollectionMethod", false},
+					FieldDef{"Presentation", "", "presentation", true},
+					FieldDef{"Unit", "", "unit", false},
+					FieldDef{"DefaultValue", "", "defaultValue", false},
+					FieldDef{"MinValue", "", "minValue", false},
+					FieldDef{"MaxValue", "", "maxValue", false},
+				}
+				compareElements(beforeMeas.MeasuredIndicator, afterMeas.MeasuredIndicator, "Name", counterFields, measCtx)
+
+				for _, bCounter := range beforeMeas.MeasuredIndicator {
+					for _, aCounter := range afterMeas.MeasuredIndicator {
+						if bCounter.Name == aCounter.Name {
+							context := Context{"", beforeMeas.MeasurementType, bCounter.Name, ""}
+							compareAggRules(bCounter, aCounter, context)
+							compareFormula(bCounter.TimeAndObjectAggregationFormula, aCounter.TimeAndObjectAggregationFormula)
+							compareDocumentation(bCounter.Documentation, aCounter.Documentation)
+							compareSupportedInProducts(bCounter.SupportedInProducts, aCounter.SupportedInProducts)
+						}
+					}
+				}
+
+				compareSupportedMeasurementIntervals(beforeMeas.SupportedMeasurementIntervals, afterMeas.SupportedMeasurementIntervals, measCtx)
 			}
 		}
 	}
 }
 
-func compareMeasurement(before Measurement, after Measurement) {
-	fmt.Println("==================== Compare measurement:", before.MeasurementType, "=======================")
-	write(fmt.Sprint("==================== Compare measurement:", before.MeasurementType, "======================="))
-	compareMeasurementField(before, after)
-	compareMeasuredTargets(before, after)
-	compareCounters(before, after)
-	compareSupportedMeasurementIntervals(before.SupportedMeasurementIntervals, after.SupportedMeasurementIntervals, before)
-}
-
-func compareCounters(beforeMeas Measurement, afterMeas Measurement)  {
-	lenBefore := len(beforeMeas.MeasuredIndicator)
-	lenAfter := len(afterMeas.MeasuredIndicator)
-	if lenBefore != lenAfter {
-		fmt.Println("Number of Counters is not equal, before:", lenBefore, ", after:", lenAfter)
-		write(fmt.Sprint("Number of Counters is not equal, before:", lenBefore, ", after:", lenAfter))
-	} else {
-		for _, before := range beforeMeas.MeasuredIndicator {
-			isFound := false
-			for _, after := range afterMeas.MeasuredIndicator {
-				if before.Name == after.Name {
-					isFound = true
-					compareCounter(before, after, beforeMeas)
-					break
-				}
-			}
-			if !isFound {
-				fmt.Println("Counter:", before.Name, "is not found in exported PMB")
-				write(fmt.Sprint("Counter:", before.Name, "is not found in exported PMB"))
-			}
-		}
-
-		for _, after := range afterMeas.MeasuredIndicator {
-			isFound := false
-			for _, before := range beforeMeas.MeasuredIndicator {
-				if after.Name == before.Name {
-					isFound = true
-					break
-				}
-			}
-			if !isFound {
-				fmt.Println("Counter:", after.Name, "is added wrongly in exported PMB")
-				write(fmt.Sprint("Counter:", after.Name, "is added wrongly in exported PMB"))
-			}
-		}
-	}
-}
-
-func compareCounter(before MeasuredIndicator, after MeasuredIndicator, meas Measurement)  {
-	compareCounterFields(before, after, meas)
-	compareAggRules(before, after, meas)
-	compareFormula(before.TimeAndObjectAggregationFormula, after.TimeAndObjectAggregationFormula)
-	compareDocumentation(before.Documentation, after.Documentation)
-	compareSupportedInProducts(before.SupportedInProducts, after.SupportedInProducts)
-}
-
-func compareAggRules(before MeasuredIndicator, after MeasuredIndicator, meas Measurement)  {
-	devType := "Counter AGG Rules Deviation"
+func compareAggRules(before MeasuredIndicator, after MeasuredIndicator, context Context)  {
+	category := "Agg Rule Deviation"
 	if "" != before.TimeAndObjectAggregationRule && "" != after.TimeAndObjectAggregationRule {
-		compareField("Counter [" + before.Name + "] TimeAndObjectAggregationRule", before.TimeAndObjectAggregationRule, after.TimeAndObjectAggregationRule, true, devType, "", meas.MeasurementType, before.Name)
+		compareField("TimeAndObjectAggregationRule", before.TimeAndObjectAggregationRule, after.TimeAndObjectAggregationRule, true, category, context)
 	} else if "" != before.TimeAndObjectAggregationRule && "" == after.TimeAndObjectAggregationRule {
 		if "" != after.TimeAggregationRule && "" != after.ObjectAggregationRule {
-			compareField("Counter [" + before.Name + "] TimeAggregationRule", before.TimeAndObjectAggregationRule, after.TimeAggregationRule, true, devType, "", meas.MeasurementType, before.Name)
-			compareField("Counter [" + before.Name + "] ObjectAggregationRule", before.TimeAndObjectAggregationRule, after.ObjectAggregationRule, true, devType, "", meas.MeasurementType, before.Name)
+			compareField("TimeAggregationRule", before.TimeAndObjectAggregationRule, after.TimeAggregationRule, true, category, context)
+			compareField("ObjectAggregationRule", before.TimeAndObjectAggregationRule, after.ObjectAggregationRule, true, category, context)
 		} else {
-			devType = "Counter AGG Rule Not Exported"
 			if "" == after.TimeAggregationRule {
-				fmt.Println("TimeAggregationRule is not defined in exported PMB")
-				write(fmt.Sprint("TimeAggregationRule is not defined in exported PMB"))
-				deviation := Deviation{
-					Level: "error",
-					MeasurementType: meas.MeasurementType,
-					Counter: before.Name,
-					Type: devType,
-					Message: fmt.Sprint("TimeAggregationRule is not defined in exported PMB"),
-				}
-				deviations = append(deviations, deviation)
+				message := fmt.Sprint("TimeAggregationRule is missing in exported PMB")
+				category = "TimeAggregationRule Not Exported"
+				logDeviation(category, message, context)
 			}
 			if "" == after.ObjectAggregationRule {
-				fmt.Println("ObjectAggregationRule is not defined")
-				write(fmt.Sprint("ObjectAggregationRule is not defined in exported PMB"))
-				deviation := Deviation{
-					Level: "error",
-					MeasurementType: meas.MeasurementType,
-					Counter: before.Name,
-					Type: devType,
-					Message: fmt.Sprint("ObjectAggregationRule is not defined in exported PMB"),
-				}
-				deviations = append(deviations, deviation)
+				message := fmt.Sprint("ObjectAggregationRule is not defined in exported PMB")
+				category = "ObjectAggregationRule Not Exported"
+				logDeviation(category, message, context)
 			}
 		}
 	} else if "" == before.TimeAndObjectAggregationRule && "" != after.TimeAndObjectAggregationRule {
 		if "" != before.TimeAggregationRule && "" != before.ObjectAggregationRule {
-			compareField("Counter [" + before.Name + "] TimeAggregationRule", before.TimeAggregationRule, after.TimeAndObjectAggregationRule, true, devType, "", meas.MeasurementType, before.Name)
-			compareField("Counter [" + before.Name + "] ObjectAggregationRule", before.ObjectAggregationRule, after.TimeAndObjectAggregationRule, true, devType, "", meas.MeasurementType, before.Name)
+			compareField("TimeAggregationRule", before.TimeAggregationRule, after.TimeAndObjectAggregationRule, true, category, context)
+			compareField("ObjectAggregationRule", before.ObjectAggregationRule, after.TimeAndObjectAggregationRule, true, category, context)
 		} else {
-			devType = "Counter AGG Rule Not Defined"
+
 			if "" == before.TimeAggregationRule {
-				fmt.Println("TimeAggregationRule is not defined in import PMB")
-				write(fmt.Sprint("TimeAggregationRule is not defined in import PMB"))
-				deviation := Deviation{
-					Level: "error",
-					MeasurementType: meas.MeasurementType,
-					Counter: before.Name,
-					Type: devType,
-					Message: fmt.Sprint("TimeAggregationRule is not defined in import PMB"),
-				}
-				deviations = append(deviations, deviation)
+				message := fmt.Sprint("TimeAggregationRule is not defined in import PMB")
+				category = "TimeAggregationRule Not Defined"
+				logDeviation(category, message, context)
 			}
 			if "" == before.ObjectAggregationRule {
-				fmt.Println("ObjectAggregationRule is not defined in import PMB")
-				write(fmt.Sprint("ObjectAggregationRule is not defined in import PMB"))
-				deviation := Deviation{
-					Level: "error",
-					MeasurementType: meas.MeasurementType,
-					Counter: before.Name,
-					Type: devType,
-					Message: fmt.Sprint("ObjectAggregationRule is not defined in import PMB"),
-				}
-				deviations = append(deviations, deviation)
+				message := fmt.Sprint("ObjectAggregationRule is not defined in import PMB")
+				category = "ObjectAggregationRule Not Defined"
+				logDeviation(category, message, context)
 			}
 		}
 	} else {
-		compareField("Counter [" + before.Name + "] TimeAggregationRule", before.TimeAggregationRule, after.TimeAggregationRule, true, devType, "", meas.MeasurementType, before.Name)
-		compareField("Counter [" + before.Name + "] ObjectAggregationRule", before.ObjectAggregationRule, after.ObjectAggregationRule, true, devType, "", meas.MeasurementType, before.Name)
+		compareField("TimeAggregationRule", before.TimeAggregationRule, after.TimeAggregationRule, true, category, context)
+		compareField("ObjectAggregationRule", before.ObjectAggregationRule, after.ObjectAggregationRule, true, category, context)
 	}
 }
 
@@ -390,220 +484,41 @@ func compareFormula(before Formula, after Formula)  {
 
 }
 
-func compareCounterFields(before MeasuredIndicator, after MeasuredIndicator, meas Measurement)  {
-	b := before.NameInOMeS
-	a := after.NameInOMeS
-	if "" == b {
-		b = before.Name
-	}
-	if "" == a {
-		a = after.Name
-	}
-	devType := "Counter Deviation"
-	compareField("Counter [" + before.Name + "] nameInOMeS", b, a, true, devType, "", meas.MeasurementType, before.Name)
-
-	compareField("Counter [" + before.Name + "] Description", before.Description, after.Description, true, devType, "", meas.MeasurementType, before.Name)
-	compareField("Counter [" + before.Name + "] dataCollectionMethod", before.DataCollectionMethod, after.DataCollectionMethod, true, devType, "", meas.MeasurementType, before.Name)
-	b = before.Presentation
-	a = after.Presentation
-	if "" == b {
-		b = before.Name
-	}
-	if "" == a {
-		a = after.Name
-	}
-	compareField("Counter [" + before.Name + "] presentation", b, a, true, devType, "", meas.MeasurementType, before.Name)
-	compareField("Counter [" + before.Name + "] unit", before.Unit, after.Unit, true, devType, "", meas.MeasurementType, before.Name)
-	compareField("Counter [" + before.Name + "] defaultValue", before.DefaultValue, after.DefaultValue, true, devType, "", meas.MeasurementType, before.Name)
-	compareField("Counter [" + before.Name + "] minValue", before.MinValue, after.MinValue, true, devType, "", meas.MeasurementType, before.Name)
-	compareField("Counter [" + before.Name + "] maxValue", before.MaxValue, after.MaxValue, true, devType, "", meas.MeasurementType, before.Name)
-}
-
-func compareSupportedMeasurementIntervals(before *SupportedMeasurementIntervals, after *SupportedMeasurementIntervals, meas Measurement)  {
-	devType := "AoM Config Deviation"
+func compareSupportedMeasurementIntervals(before *SupportedMeasurementIntervals, after *SupportedMeasurementIntervals, context Context)  {
+	category := "AoM Config Deviation"
 	if nil != before && nil != after {
-		compareField("Documentation", before.Documentation, after.Documentation, true, devType, "", meas.MeasurementType, "")
-		compareField("recommendedInterval", before.RecommendedInterval, after.RecommendedInterval, true, "AoM: recommendedInterval deviation", "", meas.MeasurementType, "")
-		lenBefore := len(before.SupportedMeasurementInterval)
-		lenAfter := len(after.SupportedMeasurementInterval)
-		if lenBefore != lenAfter {
-			fmt.Println("Number of SupportedMeasurementInterval is not equal, before:", lenBefore, ", after:", lenAfter)
-			write(fmt.Sprint("Number of SupportedMeasurementInterval is not equal, before:", lenBefore, ", after:", lenAfter))
-		} else {
-			for _, before := range before.SupportedMeasurementInterval {
-				isFound := false
-				for _, after := range after.SupportedMeasurementInterval {
-					if before == after {
-						isFound = true
-						break
-					}
-				}
-				if !isFound {
-					fmt.Println("SupportedMeasurementInterval:", before, "is not found in exported PMB")
-					write(fmt.Sprint("SupportedMeasurementInterval:", before, "is not found in exported PMB"))
-				}
-			}
+		compareField("Documentation", before.Documentation, after.Documentation, true, category, context)
+		compareField("recommendedInterval", before.RecommendedInterval, after.RecommendedInterval, true, "AoM: recommendedInterval deviation", context)
 
-			for _, after := range after.SupportedMeasurementInterval {
-				isFound := false
-				for _, before := range before.SupportedMeasurementInterval {
-					if after == before {
-						isFound = true
-						break
-					}
-				}
-				if !isFound {
-					fmt.Println("SupportedMeasurementInterval:", after, "is added wrongly in exported PMB")
-					write(fmt.Sprint("SupportedMeasurementInterval:", after, "is added wrongly in exported PMB"))
-				}
-			}
-		}
+		compareNumber("SupportedMeasurementInterval", before.SupportedMeasurementInterval, after.SupportedMeasurementInterval, context)
+		compareElements(before.SupportedMeasurementInterval, after.SupportedMeasurementInterval, "", []interface{}{}, context)
+
 	} else if nil != before && nil == after {
-		fmt.Println("SupportedMeasurementIntervals is not exported")
-		write(fmt.Sprint("SupportedMeasurementIntervals is not exported"))
+		message := fmt.Sprint("SupportedMeasurementIntervals is not exported")
+		logDeviation(category, message, context)
 	} else if nil == before && nil != after {
-		fmt.Println("SupportedMeasurementIntervals is added in exported PMB")
-		write(fmt.Sprint("SupportedMeasurementIntervals is added in exported PMB"))
+		message := fmt.Sprint("SupportedMeasurementIntervals is added in exported PMB")
+		logDeviation(category, message, context)
 	}
 }
 
-func compareMeasuredTargets(before Measurement, after Measurement) {
-	lenBefore := len(before.MeasuredTarget)
-	lenAfter := len(after.MeasuredTarget)
-	if lenBefore != lenAfter {
-		fmt.Println("Number of MeasuredTarget is not equal, before:", lenBefore, ", after:", lenAfter)
-		write(fmt.Sprint("Number of MeasuredTarget is not equal, before:", lenBefore, ", after:", lenAfter))
-	} else {
-		for _, before := range before.MeasuredTarget {
-			isFound := false
-			for _, after := range after.MeasuredTarget {
-				if before.Dimension == after.Dimension {
-					isFound = true
-					compareHierarchy(before, after)
-					break
-				}
-			}
-			if !isFound {
-				fmt.Println("MeasuredTarget with diemension:", before.Dimension, "is not found in exported PMB")
-				write(fmt.Sprint("MeasuredTarget with diemension:", before.Dimension, "is not found in exported PMB"))
-			}
-		}
-
-		for _, after := range after.MeasuredTarget {
-			isFound := false
-			for _, before := range before.MeasuredTarget {
-				if after.Dimension == before.Dimension {
-					isFound = true
-					break
-				}
-			}
-			if !isFound {
-				fmt.Println("PM class:", after.Dimension, "is added wrongly in exported PMB")
-				write(fmt.Sprint("PM class:", after.Dimension, "is added wrongly in exported PMB"))
-			}
-		}
-	}
+func log(message string) {
+	fmt.Println(message)
+	logFile.WriteString(fmt.Sprint(message, "\n"))
 }
 
-func compareHierarchy(before MeasuredTarget, after MeasuredTarget) {
-	lenBefore := len(before.Hierarchy)
-	lenAfter := len(after.Hierarchy)
-	if lenBefore != lenAfter {
-		fmt.Println("Number of Hierarchy is not equal, before:", lenBefore, ", after:", lenAfter)
-		write(fmt.Sprint("Number of Hierarchy is not equal, before:", lenBefore, ", after:", lenAfter))
-	} else {
-		for _, before := range before.Hierarchy {
-			isFound := false
-			for _, after := range after.Hierarchy {
-				if before == after {
-					isFound = true
-					break
-				}
-			}
-			if !isFound {
-				fmt.Println("Hierarchy:", before, "is not found in exported PMB")
-				write(fmt.Sprint("Hierarchy:", before, "is not found in exported PMB"))
-			}
-		}
-
-		for _, after := range after.Hierarchy {
-			isFound := false
-			for _, before := range before.Hierarchy {
-				if after == before {
-					isFound = true
-					break
-				}
-			}
-			if !isFound {
-				fmt.Println("Hierarchy:", after, "is added wrongly in exported PMB")
-				write(fmt.Sprint("Hierarchy:", after, "is added wrongly in exported PMB"))
-			}
-		}
-	}
-}
-
-func compareMeasurementField(before Measurement, after Measurement) {
-	b := before.MeasurementTypeInOMeS
-	a := after.MeasurementTypeInOMeS
-	if "" == b {
-		b = before.MeasurementType
-	}
-	if "" == a {
-		a = after.MeasurementType
-	}
-	devType := "Measurement Deviation"
-	compareField("Measurement [" + before.MeasurementType + "] measurementTypeInOMeS", b, a, true, devType, "", before.MeasurementType, "")
-	b = before.Presentation
-	a = after.Presentation
-	if "" == b {
-		b = before.MeasurementType
-	}
-	if "" == a {
-		a = after.MeasurementType
-	}
-	compareField("Measurement [" + before.MeasurementType + "] presentation", b, a, true, devType, "", before.MeasurementType, "")
-	compareField("Measurement [" + before.MeasurementType + "] defaultInterval", before.DefaultInterval, after.DefaultInterval, true, devType, "", before.MeasurementType, "")
-	compareField("Measurement [" + before.MeasurementType + "] networkElementMeasurementId", before.NetworkElementMeasurementId, after.NetworkElementMeasurementId, true, "Measurement: networkElementMeasurementId deviation", "", before.MeasurementType, "")
-	compareField("Measurement [" + before.MeasurementType + "] omesFileGroupName", before.OmesFileGroupName, after.OmesFileGroupName, true, devType, "", before.MeasurementType, "")
-	compareField("Measurement [" + before.MeasurementType + "] resultsPerInterval", before.ResultsPerInterval, after.ResultsPerInterval, true, devType, "", before.MeasurementType, "")
-	b = before.AomSupported
-	a = after.AomSupported
-	if "" == b {
-		b = "true"
-	}
-	if "" == a {
-		a = "true"
-	}
-	compareField("[" + before.MeasurementType + "] aomSupported", b, a, true, devType, "", before.MeasurementType, "")
-	compareField("[" + before.MeasurementType + "] Description", before.Description, after.Description, true, devType, "", before.MeasurementType, "")
-}
-
-func write(message string) {
-	logFile.WriteString(fmt.Sprint(message,"\n"))
-}
-
-func compareField(fieldName string, beforeValue string, afterValue string, isOut bool, deviationType string, pmClass string, measurementType string, counter string) {
+func compareField(fieldName string, beforeValue string, afterValue string, isOut bool, category string, context Context) {
 	if strings.TrimSpace(beforeValue) != strings.TrimSpace(afterValue) {
 		if isOut {
-			fmt.Println(fieldName, "is different:")
-			fmt.Println("	before : {",beforeValue,"}")
-			fmt.Println("	after  : {",afterValue,"}")
-
-			write(fmt.Sprint(fieldName, " is different:"))
-			write(fmt.Sprint("	before : {",beforeValue,"}"))
-			write(fmt.Sprint("	after  : {",afterValue,"}"))
-
-			deviation := Deviation{
-				Level: "error",
-				Type: deviationType,
-				PmClass: pmClass,
-				MeasurementType: measurementType,
-				Counter: counter,
-				Message: fmt.Sprint(fieldName, " is different: before {", beforeValue, "}, after {", afterValue, "}"),
-			}
-			deviations = append(deviations, deviation)
+			message := fmt.Sprint(fieldName, " is different, before {", beforeValue, "}, after {", afterValue, "}")
+			logDeviation(category, message, context)
 		}
 	}
+}
+
+func logDeviation(category string, message string, context Context) {
+	log(message)
+	raiseDeviation(category, message, context)
 }
 
 func writeResult() {
