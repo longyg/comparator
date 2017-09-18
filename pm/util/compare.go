@@ -279,6 +279,7 @@ func compareElementFields(bv reflect.Value, av reflect.Value, keyFieldName strin
 	if bv.Type().Name() == "string" {
 		return
 	}
+
 	elementType := getElementTypeName(bv)
 	bIdentiferFieldValue := getFieldStringValue(bv, keyFieldName)
 
@@ -491,7 +492,7 @@ func compareSupportedMeasurementIntervals(before *SupportedMeasurementIntervals,
 		compareField("recommendedInterval", before.RecommendedInterval, after.RecommendedInterval, true, "AoM: recommendedInterval deviation", context)
 
 		compareNumber("SupportedMeasurementInterval", before.SupportedMeasurementInterval, after.SupportedMeasurementInterval, context)
-		compareElements(before.SupportedMeasurementInterval, after.SupportedMeasurementInterval, "", []interface{}{}, context)
+		compareElements(before.SupportedMeasurementInterval, after.SupportedMeasurementInterval, "Value", []interface{}{}, context)
 
 	} else if nil != before && nil == after {
 		message := fmt.Sprint("SupportedMeasurementIntervals is not exported")
