@@ -82,8 +82,8 @@ type MeasuredIndicator struct {
 	ObjectAggregationFormula Formula
 	TimeAggregationRule string
 	TimeAggregationFormula Formula
-	Documentation MeasuredIndicatorDocumentation
-	SupportedInProducts SupportedInProducts
+	Documentation *MeasuredIndicatorDocumentation
+	SupportedInProducts *SupportedInProducts
 	Annotation []Annotation
 
 	Name string `xml:"name,attr"`

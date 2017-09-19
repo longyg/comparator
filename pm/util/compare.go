@@ -139,27 +139,6 @@ func compareNumber(element string, before interface{}, after interface{}, contex
 	}
 }
 
-func raiseDeviation(category string, message string, context Context) {
-	deviation := Deviation {
-		Level: "error",
-		DeviationCategory: category,
-		Message: fmt.Sprint(message),
-	}
-	if context.PMClass != "" {
-		deviation.PmClass = &context.PMClass
-	}
-	if context.MeasurementType != "" {
-		deviation.MeasurementType = &context.MeasurementType
-	}
-	if context.Counter != "" {
-		deviation.Counter = &context.Counter
-	}
-	if context.Dimension != "" {
-		deviation.Dimension = &context.Dimension
-	}
-	deviations = append(deviations, deviation)
-}
-
 func compareElements(before interface{}, after interface{}, keyFieldName string, fields interface{}, context Context) {
 	bt := reflect.TypeOf(before)
 	at := reflect.TypeOf(after)
@@ -276,10 +255,6 @@ func getElementTypeName(v reflect.Value) string {
 }
 
 func compareElementFields(bv reflect.Value, av reflect.Value, keyFieldName string, fields interface{}, context Context) {
-	if bv.Type().Name() == "string" {
-		return
-	}
-
 	elementType := getElementTypeName(bv)
 	bIdentiferFieldValue := getFieldStringValue(bv, keyFieldName)
 
@@ -418,8 +393,8 @@ func compareMeasurementChildElements(beforePmb PMBasic, afterPmb PMBasic) {
 							context := Context{"", beforeMeas.MeasurementType, bCounter.Name, ""}
 							compareAggRules(bCounter, aCounter, context)
 							compareFormula(bCounter.TimeAndObjectAggregationFormula, aCounter.TimeAndObjectAggregationFormula)
-							compareDocumentation(bCounter.Documentation, aCounter.Documentation)
-							compareSupportedInProducts(bCounter.SupportedInProducts, aCounter.SupportedInProducts)
+							compareDocumentation(bCounter.Documentation, aCounter.Documentation, context)
+							compareSupportedInProducts(bCounter.SupportedInProducts, aCounter.SupportedInProducts, context)
 						}
 					}
 				}
@@ -445,7 +420,7 @@ func compareAggRules(before MeasuredIndicator, after MeasuredIndicator, context 
 				logDeviation(category, message, context)
 			}
 			if "" == after.ObjectAggregationRule {
-				message := fmt.Sprint("ObjectAggregationRule is not defined in exported PMB")
+				message := fmt.Sprint("ObjectAggregationRule is missing in exported PMB")
 				category = "ObjectAggregationRule Not Exported"
 				logDeviation(category, message, context)
 			}
@@ -473,16 +448,93 @@ func compareAggRules(before MeasuredIndicator, after MeasuredIndicator, context 
 	}
 }
 
-func compareSupportedInProducts(before SupportedInProducts, after SupportedInProducts)  {
-
+func compareSupportedInProducts(before *SupportedInProducts, after *SupportedInProducts, context Context)  {
+	category := "SupportedInProducts Deviation"
+	if nil != before && nil != after {
+		//
+	} else if nil != before && nil == after {
+		message := fmt.Sprint("SupportedInProducts is missing in exported PMB")
+		logDeviation(category, message, context)
+	} else if nil == before && nil != after {
+		message := fmt.Sprint("SupportedInProducts is adding in exported PMB")
+		logDeviation(category, message, context)
+	}
 }
 
-func compareDocumentation(before MeasuredIndicatorDocumentation, after MeasuredIndicatorDocumentation)  {
-
+func compareDocumentation(before *MeasuredIndicatorDocumentation, after *MeasuredIndicatorDocumentation, context Context)  {
+	category := "Counter Documentation Deviation"
+	if nil != before && nil != after {
+		//
+	} else if nil != before && nil == after {
+		message := fmt.Sprint("MeasuredIndicatorDocumentation is missing in exported PMB")
+		logDeviation(category, message, context)
+	} else if nil == before && nil != after {
+		message := fmt.Sprint("MeasuredIndicatorDocumentation is adding in exported PMB")
+		logDeviation(category, message, context)
+	}
 }
 
 func compareFormula(before Formula, after Formula)  {
 
+}
+
+func compareSimpleElements(elementName string, before interface{}, after interface{}, context Context) {
+	bt := reflect.TypeOf(before)
+	at := reflect.TypeOf(after)
+
+	if bt.Kind() != reflect.Slice {
+		panic("before argument is not slice")
+	}
+	if at.Kind() != reflect.Slice {
+		panic("after argument is not slice")
+	}
+
+	bv := reflect.ValueOf(before)
+	av := reflect.ValueOf(after)
+
+	for i := 0; i < bv.Len(); i++ {
+		be := bv.Index(i)
+		bFieldValue := be.String()
+
+		isFound := false
+
+		for j := 0; j < av.Len(); j++ {
+			ae := av.Index(j)
+			aFieldValue := ae.String()
+
+			if bFieldValue == aFieldValue {
+				isFound = true
+				break
+			}
+		}
+		if !isFound {
+			message := fmt.Sprint(fmt.Sprint(elementName, " [", bFieldValue, "] is missing in exported PMB"))
+			category := fmt.Sprint("Missing ", elementName)
+			logDeviation(category, message, context)
+		}
+	}
+
+	for i := 0; i < av.Len(); i++ {
+		ae := av.Index(i)
+		aFieldValue := ae.String()
+
+		isFound := false
+
+		for j := 0; j < bv.Len(); j++ {
+			be := bv.Index(j)
+			bFieldValue := be.String()
+
+			if aFieldValue == bFieldValue {
+				isFound = true
+				break
+			}
+		}
+		if !isFound {
+			message := fmt.Sprint(fmt.Sprint(elementName, " [", aFieldValue, "] is adding in exported PMB"))
+			category := fmt.Sprint("Adding ", elementName)
+			logDeviation(category, message, context)
+		}
+	}
 }
 
 func compareSupportedMeasurementIntervals(before *SupportedMeasurementIntervals, after *SupportedMeasurementIntervals, context Context)  {
@@ -492,8 +544,7 @@ func compareSupportedMeasurementIntervals(before *SupportedMeasurementIntervals,
 		compareField("recommendedInterval", before.RecommendedInterval, after.RecommendedInterval, true, "AoM: recommendedInterval deviation", context)
 
 		compareNumber("SupportedMeasurementInterval", before.SupportedMeasurementInterval, after.SupportedMeasurementInterval, context)
-		compareElements(before.SupportedMeasurementInterval, after.SupportedMeasurementInterval, "Value", []interface{}{}, context)
-
+		compareSimpleElements("SupportedMeasurementInterval", before.SupportedMeasurementInterval, after.SupportedMeasurementInterval, context)
 	} else if nil != before && nil == after {
 		message := fmt.Sprint("SupportedMeasurementIntervals is not exported")
 		logDeviation(category, message, context)
@@ -503,11 +554,6 @@ func compareSupportedMeasurementIntervals(before *SupportedMeasurementIntervals,
 	}
 }
 
-func log(message string) {
-	fmt.Println(message)
-	logFile.WriteString(fmt.Sprint(message, "\n"))
-}
-
 func compareField(fieldName string, beforeValue string, afterValue string, isOut bool, category string, context Context) {
 	if strings.TrimSpace(beforeValue) != strings.TrimSpace(afterValue) {
 		if isOut {
@@ -515,6 +561,32 @@ func compareField(fieldName string, beforeValue string, afterValue string, isOut
 			logDeviation(category, message, context)
 		}
 	}
+}
+
+func raiseDeviation(category string, message string, context Context) {
+	deviation := Deviation {
+		Level: "error",
+		DeviationCategory: category,
+		Message: fmt.Sprint(message),
+	}
+	if context.PMClass != "" {
+		deviation.PmClass = &context.PMClass
+	}
+	if context.MeasurementType != "" {
+		deviation.MeasurementType = &context.MeasurementType
+	}
+	if context.Counter != "" {
+		deviation.Counter = &context.Counter
+	}
+	if context.Dimension != "" {
+		deviation.Dimension = &context.Dimension
+	}
+	deviations = append(deviations, deviation)
+}
+
+func log(message string) {
+	fmt.Println(message)
+	logFile.WriteString(fmt.Sprint(message, "\n"))
 }
 
 func logDeviation(category string, message string, context Context) {
