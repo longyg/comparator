@@ -274,6 +274,10 @@ func compareElementFields(bv reflect.Value, av reflect.Value, keyFieldName strin
 
 			bFieldValue := getFieldStringValue(bv, fieldName)
 			aFieldValue := getFieldStringValue(av, fieldName)
+			if elementType == "Measurement" && fieldName == "DefaultInterval" && bIdentiferFieldValue == "UB6FR"  {
+				fmt.Println("==============>", bFieldValue)
+				fmt.Println("==============>", aFieldValue)
+			}
 
 			if handleEmpty {
 				if "" == bFieldValue {
@@ -293,6 +297,11 @@ func compareElementFields(bv reflect.Value, av reflect.Value, keyFieldName strin
 			}
 
 			compareFieldValue(elementType, bIdentiferFieldValue, bFieldValue, aFieldValue, xmlFieldName, context)
+
+			if elementType == "Measurement" && xmlFieldName == "defaultInterval" && bIdentiferFieldValue == "UB6FR"  {
+				fmt.Println("UB6FR")
+				compareFieldValue(elementType, bIdentiferFieldValue, bFieldValue, aFieldValue, xmlFieldName, context)
+			}
 		} else {
 			fmt.Println("Error: Invalid field", fve)
 			panic("Invalid field")
@@ -301,6 +310,10 @@ func compareElementFields(bv reflect.Value, av reflect.Value, keyFieldName strin
 }
 
 func compareFieldValue(elementType string, identifer string, bFieldValue string, aFieldValue string, xmlFieldName string, context Context) {
+	if elementType == "Measurement" && xmlFieldName == "defaultInterval" && identifer == "UB6FR"  {
+		fmt.Println("==============>", bFieldValue)
+		fmt.Println("==============>", aFieldValue)
+	}
 	fieldInfo := fmt.Sprint(elementType, " [", identifer, "] ", xmlFieldName)
 	category := fmt.Sprint(elementType, " Deviation")
 	if elementType == "MeasuredIndicator" {
@@ -393,7 +406,7 @@ func compareMeasurementChildElements(beforePmb PMBasic, afterPmb PMBasic) {
 							context := Context{"", beforeMeas.MeasurementType, bCounter.Name, ""}
 							compareAggRules(bCounter, aCounter, context)
 							compareFormula(bCounter.TimeAndObjectAggregationFormula, aCounter.TimeAndObjectAggregationFormula)
-							compareDocumentation(bCounter.Documentation, aCounter.Documentation, context)
+							//compareDocumentation(bCounter.Documentation, aCounter.Documentation, context)
 							compareSupportedInProducts(bCounter.SupportedInProducts, aCounter.SupportedInProducts, context)
 						}
 					}
@@ -466,10 +479,10 @@ func compareDocumentation(before *MeasuredIndicatorDocumentation, after *Measure
 	if nil != before && nil != after {
 		//
 	} else if nil != before && nil == after {
-		message := fmt.Sprint("MeasuredIndicatorDocumentation is missing in exported PMB")
+		message := fmt.Sprint("Counter Documentation is missing in exported PMB")
 		logDeviation(category, message, context)
 	} else if nil == before && nil != after {
-		message := fmt.Sprint("MeasuredIndicatorDocumentation is adding in exported PMB")
+		message := fmt.Sprint("Counter Documentation is adding in exported PMB")
 		logDeviation(category, message, context)
 	}
 }
@@ -554,10 +567,13 @@ func compareSupportedMeasurementIntervals(before *SupportedMeasurementIntervals,
 	}
 }
 
-func compareField(fieldName string, beforeValue string, afterValue string, isOut bool, category string, context Context) {
+func compareField(fieldInfo string, beforeValue string, afterValue string, isOut bool, category string, context Context) {
 	if strings.TrimSpace(beforeValue) != strings.TrimSpace(afterValue) {
 		if isOut {
-			message := fmt.Sprint(fieldName, " is different, before {", beforeValue, "}, after {", afterValue, "}")
+			if fieldInfo == "Measurement [UB6FR] networkElementMeasurementId" {
+				fmt.Println("======================> ", beforeValue, afterValue)
+			}
+			message := fmt.Sprint(fieldInfo, " is different, before {", beforeValue, "}, after {", afterValue, "}")
 			logDeviation(category, message, context)
 		}
 	}
